@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integration Log Search</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#17202c; --muted:#5d6879; --line:#dde2ea; --accent:#1f3a63; --bad:#a3302a; --bad-bg:#f9e3e1; --ok:#1d7a4c; --ok-bg:#e3f3ea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#10151d; --card:#171e29; --fg:#e6eaf1; --muted:#9aa5b5; --line:#283244; --accent:#8fb2e6; --bad:#f19b94; --bad-bg:#3a1a18; --ok:#6fd3a0; --ok-bg:#143224; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; padding:24px 16px; }
+  main { max-width:1100px; margin:0 auto; display:grid; gap:16px; }
+  h1 { margin:0; font-size:26px; } p { margin:0; color:var(--muted); }
+  form { display:flex; gap:8px; flex-wrap:wrap; }
+  input { flex:1 1 260px; font:inherit; padding:9px 12px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
+  button { font:inherit; font-weight:600; padding:9px 18px; border:0; border-radius:6px; background:var(--accent); color:var(--card); cursor:pointer; }
+  .box { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; min-width:820px; font-size:14px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  td.mono { font-family:ui-monospace, Menlo, monospace; font-size:13px; white-space:nowrap; }
+  .pill { font-size:12px; font-weight:600; padding:1px 8px; border-radius:99px; background:var(--ok-bg); color:var(--ok); }
+  .pill.err { background:var(--bad-bg); color:var(--bad); }
+  details summary { cursor:pointer; color:var(--accent); }
+  pre { white-space:pre-wrap; word-break:break-word; margin:6px 0 0; font-size:12px; }
+  h2 { font-size:17px; margin:8px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Integration Log Search</h1>
+  <p id="stats">Loading index…</p>
+  <form id="form">
+    <input id="q" placeholder="Booking number, container, partner, message id…" aria-label="Search" autofocus>
+    <button>Search</button>
+  </form>
+  <p id="summary"></p>
+  <h2>Direct hits</h2>
+  <div class="box"><table><thead><tr><th>Time</th><th>Process</th><th>Status</th><th>Partner</th><th>Message id</th><th>Correlation id</th><th>Payload</th></tr></thead><tbody id="direct"></tbody></table></div>
+  <h2>Related steps of the same transactions</h2>
+  <div class="box"><table><thead><tr><th>Time</th><th>Process</th><th>Status</th><th>Partner</th><th>Message id</th><th>Correlation id</th><th>Payload</th></tr></thead><tbody id="related"></tbody></table></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+
+function cell(tr, text, cls) {
+  const td = document.createElement("td");
+  if (cls) td.className = cls;
+  td.textContent = text ?? "";
+  tr.append(td);
+  return td;
+}
+
+function fill(tbody, rows) {
+  tbody.textContent = "";
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = cell(tr, "No rows.");
+    td.colSpan = 7;
+    tbody.append(tr);
+    return;
+  }
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    cell(tr, r.timestamp, "mono");
+    cell(tr, r.process);
+    const st = cell(tr, "");
+    const pill = document.createElement("span");
+    pill.className = "pill" + (/ERROR|FAILED/i.test(r.status || "") ? " err" : "");
+    pill.textContent = r.status || "–";
+    st.append(pill);
+    cell(tr, r.partner);
+    cell(tr, r.message_id, "mono");
+    cell(tr, r.correlation_id, "mono");
+    const p = cell(tr, "");
+    const d = document.createElement("details");
+    const s = document.createElement("summary");
+    s.textContent = (r.payload || "").slice(0, 40) + ((r.payload || "").length > 40 ? "…" : "");
+    const pre = document.createElement("pre");
+    pre.textContent = r.payload || "";
+    d.append(s, pre);
+    p.append(d);
+    tbody.append(tr);
+  }
+}
+
+async function run(query) {
+  $("summary").textContent = "Searching…";
+  const res = await fetch("/api/search?q=" + encodeURIComponent(query));
+  const data = await res.json();
+  $("summary").textContent = `${data.direct.length} direct hits, ${data.related.length} related steps, ${data.errors} errors.`;
+  fill($("direct"), data.direct);
+  fill($("related"), data.related);
+}
+
+$("form").addEventListener("submit", (e) => { e.preventDefault(); if ($("q").value.trim()) run($("q").value.trim()); });
+
+fetch("/api/stats").then(r => r.json()).then(s => {
+  const errors = (s.by_status.ERROR || 0) + (s.by_status.FAILED || 0);
+  $("stats").textContent = `${s.rows.toLocaleString()} log rows from ${s.from} to ${s.to}, ${errors} errors.`;
+});
+</script>
+</body>
+</html>
